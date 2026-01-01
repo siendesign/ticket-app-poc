@@ -28,10 +28,10 @@ const kafka = new Kafka({
   // Authentication (for production)
   ...(process.env.KAFKA_SASL_USERNAME && {
     sasl: {
-      mechanism: 'plain',
+      mechanism: (process.env.KAFKA_SASL_MECHANISM as 'plain' | 'scram-sha-256' | 'scram-sha-512') || 'scram-sha-256',
       username: process.env.KAFKA_SASL_USERNAME,
       password: process.env.KAFKA_SASL_PASSWORD || '',
-    },
+    } as any,
     ssl: true,
   }),
 
@@ -177,6 +177,23 @@ export async function startConsumer(): Promise<void> {
 
   await consumer.connect();
   console.log('Kafka consumer connected');
+
+  // Ensure topic exists (crucial for Hosted Kafka where auto-create might be off/slow)
+  try {
+    const admin = kafka.admin();
+    await admin.connect();
+    const topics = await admin.listTopics();
+    if (!topics.includes(TOPIC)) {
+      console.log(`Topic ${TOPIC} does not exist. Creating it...`);
+      await admin.createTopics({
+        topics: [{ topic: TOPIC, numPartitions: 1, replicationFactor: 1 }] // Safe for single broker
+      });
+      console.log(`Created topic: ${TOPIC}`);
+    }
+    await admin.disconnect();
+  } catch (error) {
+    console.warn('Failed to ensure topic exists (might be retriable or lack of permissions):', error);
+  }
 
   await consumer.subscribe({
     topic: TOPIC,

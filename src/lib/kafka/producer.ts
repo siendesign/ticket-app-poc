@@ -26,10 +26,10 @@ const kafka = new Kafka({
   // Authentication (for production)
   ...(process.env.KAFKA_SASL_USERNAME && {
     sasl: {
-      mechanism: 'plain',
+      mechanism: (process.env.KAFKA_SASL_MECHANISM as 'plain' | 'scram-sha-256' | 'scram-sha-512') || 'scram-sha-256',
       username: process.env.KAFKA_SASL_USERNAME,
       password: process.env.KAFKA_SASL_PASSWORD || '',
-    },
+    } as any,
     ssl: true,
   }),
 
