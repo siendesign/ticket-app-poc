@@ -446,7 +446,6 @@ idx_audit_time                 | Time-range queries on audit log
 -- ============================================================================
 -- Uncomment to populate with test data
 
-/*
 -- Create test user
 INSERT INTO users (id, email, password_hash, full_name)
 VALUES
@@ -459,9 +458,9 @@ VALUES (
     '33333333-3333-3333-3333-333333333333',
     'Summer Concert 2025',
     'City Arena',
-    '2025-08-15 20:00:00+00',
+    '2026-08-15 20:00:00+00',
     '2025-01-01 00:00:00+00',
-    '2025-08-15 18:00:00+00',
+    '2026-08-15 18:00:00+00',
     100,
     5000,
     'published',
@@ -479,4 +478,3 @@ SELECT
     CASE WHEN row_num <= 2 THEN 'vip' ELSE 'standard' END,
     CASE WHEN row_num <= 2 THEN 1.5 ELSE 1.0 END
 FROM generate_series(1, 10) AS row_num, generate_series(1, 10) AS seat_num;
-*/

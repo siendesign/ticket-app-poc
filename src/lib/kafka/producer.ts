@@ -80,7 +80,8 @@ async function getProducer(): Promise<Producer> {
       // transactionalId: 'ticketing-producer',
 
       // Idempotent producer - prevents duplicates on retry
-      idempotent: true,
+      // Disabled to debug connection issues
+      idempotent: false,
 
       // Require all replicas to acknowledge (strongest durability)
       // Note: This is set per-message, not here
@@ -167,7 +168,7 @@ export async function publishBookingEvent(
       },
     ],
     // Wait for leader acknowledgment (good balance of durability/speed)
-    acks: 1, // Use -1 for 'all' replicas if you need strongest durability
+    acks: -1, // Use -1 for 'all' replicas if you need strongest durability
   });
 
   console.log(`Published ${event.type} event for seat ${event.payload.seatId}`);
@@ -197,7 +198,7 @@ export async function publishBookingEventBatch(
         'trace-id': event.traceId,
       },
     })),
-    acks: 1,
+    acks: -1,
   });
 
   console.log(`Published batch of ${events.length} events`);

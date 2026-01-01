@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { broadcastToEvent } from '@/lib/realtime/broadcaster';
+// import { broadcastToEvent } from '@/lib/realtime/broadcaster';
 import type { KafkaBookingEvent, RealtimeEvent, SeatStatusChangePayload } from '@/types';
 
 // ----------------------------------------------------------------------------
@@ -23,7 +23,7 @@ import type { KafkaBookingEvent, RealtimeEvent, SeatStatusChangePayload } from '
 
 const kafka = new Kafka({
   clientId: 'ticketing-broadcast-service',
-  brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
+  brokers: (process.env.KAFKA_BROKERS || '127.0.0.1:9093').split(','),
 
   // Authentication (for production)
   ...(process.env.KAFKA_SASL_USERNAME && {
@@ -45,7 +45,7 @@ const kafka = new Kafka({
 // Consumer Configuration
 // ----------------------------------------------------------------------------
 
-const CONSUMER_GROUP_ID = 'broadcast-service';
+const CONSUMER_GROUP_ID = 'broadcast-service-v2';
 const TOPIC = 'booking-events';
 
 let consumer: Consumer | null = null;
@@ -85,26 +85,23 @@ async function handleMessage({ message, partition, topic }: EachMessagePayload):
         previousStatus: event.payload.previousStatus,
         newStatus: event.payload.newStatus,
         displayLabel: event.payload.metadata.displayLabel,
-        // Note: userId is intentionally NOT included for privacy
-        // Clients only see their own actions via the isCurrentUser flag
       },
     };
 
-    // Broadcast to all clients watching this event
-    await broadcastToEvent(event.payload.eventId, realtimeEvent, event.payload.userId);
-
-    // Log successful processing
-    console.log(
-      `Broadcast ${event.type} for seat ${event.payload.metadata.displayLabel}`
+    // Broadcast directly to connected clients
+    // Since we're now running in the same process as Next.js,
+    // we can call the broadcaster directly without HTTP
+    const { broadcastToEvent } = await import('@/lib/realtime/broadcaster');
+    
+    await broadcastToEvent(
+      event.payload.eventId,
+      realtimeEvent,
+      event.payload.userId
     );
+    
+    console.log(`Successfully broadcast ${event.type} to connected clients`);
   } catch (error) {
-    // Log but don't throw - we don't want to stop the consumer
-    // In production, send to dead letter queue for investigation
-    console.error('Failed to process message:', error, {
-      topic,
-      partition,
-      offset: message.offset,
-    });
+    console.error('Failed to process message:', error);
   }
 }
 
@@ -155,9 +152,18 @@ export async function startConsumer(): Promise<void> {
   });
 
   // Handle crashes
-  consumer.on('consumer.crash', ({ payload: { error } }) => {
+  consumer.on('consumer.crash', async ({ payload: { error } }) => {
     console.error('Consumer crashed:', error);
-    // In production: alert, restart, etc.
+    
+    // Attempt to restart
+    isRunning = false;
+    try {
+      console.log('Restaring consumer in 5 seconds...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      await startConsumer();
+    } catch (restartError) {
+      console.error('Failed to restart consumer:', restartError);
+    }
   });
 
   // Handle rebalances (partitions being reassigned)
@@ -324,3 +330,7 @@ Example Kafka message for seat.expired (system-generated):
   }
 }
 */
+
+// Consumer is now started via instrumentation.ts
+// This ensures it runs in the same process as Next.js server
+

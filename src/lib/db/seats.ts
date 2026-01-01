@@ -13,12 +13,8 @@
 //
 // ============================================================================
 
-import {
-  withTransaction,
-  selectForUpdate,
-  OptimisticLockError,
-  TransactionContext,
-} from './client';
+import prisma from '../prisma';
+import { Prisma } from '@prisma/client';
 import type {
   UUID,
   Seat,
@@ -27,6 +23,9 @@ import type {
   Booking,
   BookingErrorCode,
 } from '@/types';
+
+// Extend Seat Status to match Prisma/Types
+type InternalSeatStatus = SeatStatus;
 
 // ----------------------------------------------------------------------------
 // Types
@@ -70,6 +69,19 @@ export type HoldSeatResult = HoldResult | HoldError;
 
 const HOLD_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 
+/**
+ * Generate a human-readable confirmation code
+ * Format: TKT-XXXXXX (6 alphanumeric characters)
+ */
+function generateConfirmationCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'TKT-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 // ----------------------------------------------------------------------------
 // Seat Queries
 // ----------------------------------------------------------------------------
@@ -81,53 +93,36 @@ export async function getSeatsByEventId(
   eventId: UUID,
   currentUserId?: UUID
 ): Promise<SeatMapItem[]> {
-  const result = await withTransaction(async (tx) => {
-    // First get base price from event
-    const eventResult = await tx.query<{ base_price_cents: number }>(
-      'SELECT base_price_cents FROM events WHERE id = $1',
-      [eventId]
-    );
+  // Use a transaction even for read-only to ensure consistency between event and seats
+  return await prisma.$transaction(async (tx: any) => {
+    const event = await tx.event.findUnique({
+      where: { id: eventId },
+      select: { basePriceCents: true }
+    });
 
-    if (eventResult.rows.length === 0) {
-      return [];
-    }
+    if (!event) return [];
 
-    const basePriceCents = eventResult.rows[0].base_price_cents;
+    const seats = await tx.seat.findMany({
+      where: { eventId },
+      orderBy: [
+        { section: 'asc' },
+        { rowName: 'asc' },
+        { seatNumber: 'asc' }
+      ]
+    });
 
-    // Get all seats
-    const seatsResult = await tx.query<{
-      id: string;
-      display_label: string;
-      section: string;
-      row_name: string;
-      seat_number: string;
-      category: string;
-      status: SeatStatus;
-      price_multiplier: number;
-      held_by: string | null;
-    }>(
-      `SELECT id, display_label, section, row_name, seat_number,
-              category, status, price_multiplier, held_by
-       FROM seats
-       WHERE event_id = $1
-       ORDER BY section, row_name, seat_number`,
-      [eventId]
-    );
-
-    return seatsResult.rows.map((row) => ({
-      id: row.id,
-      displayLabel: row.display_label,
-      section: row.section,
-      rowName: row.row_name,
-      seatNumber: row.seat_number,
-      category: row.category as SeatMapItem['category'],
-      status: row.status,
-      priceCents: Math.round(basePriceCents * row.price_multiplier),
-      isOwnedByCurrentUser: currentUserId ? row.held_by === currentUserId : false,
+    return seats.map((seat: any) => ({
+      id: seat.id,
+      displayLabel: seat.displayLabel,
+      section: seat.section,
+      rowName: seat.rowName,
+      seatNumber: seat.seatNumber,
+      category: seat.category as SeatMapItem['category'],
+      status: seat.status as SeatStatus,
+      priceCents: Math.round(event.basePriceCents * seat.priceMultiplier.toNumber()),
+      isOwnedByCurrentUser: currentUserId ? seat.heldById === currentUserId : false,
     }));
-  }, { readOnly: true });
-
-  return result;
+  });
 }
 
 /**
@@ -135,50 +130,31 @@ export async function getSeatsByEventId(
  */
 export async function getSeatById(
   seatId: UUID,
-  tx?: TransactionContext
+  tx?: any // Using any to allow Prisma Transaction Client
 ): Promise<Seat | null> {
-  const executor = tx
-    ? tx.query.bind(tx)
-    : async <T>(text: string, params?: unknown[]) => {
-        const { query } = await import('./client');
-        return query<T>(text, params);
-      };
+  const client = tx || prisma;
 
-  const result = await executor<{
-    id: string;
-    event_id: string;
-    section: string;
-    row_name: string;
-    seat_number: string;
-    display_label: string;
-    category: string;
-    price_multiplier: number;
-    status: SeatStatus;
-    held_by: string | null;
-    hold_expires_at: Date | null;
-    version: number;
-    created_at: Date;
-    updated_at: Date;
-  }>('SELECT * FROM seats WHERE id = $1', [seatId]);
+  const seat = await client.seat.findUnique({
+    where: { id: seatId }
+  });
 
-  const row = result.rows[0];
-  if (!row) return null;
+  if (!seat) return null;
 
   return {
-    id: row.id,
-    eventId: row.event_id,
-    section: row.section,
-    rowName: row.row_name,
-    seatNumber: row.seat_number,
-    displayLabel: row.display_label,
-    category: row.category as Seat['category'],
-    priceMultiplier: row.price_multiplier,
-    status: row.status,
-    heldBy: row.held_by,
-    holdExpiresAt: row.hold_expires_at,
-    version: row.version,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    id: seat.id,
+    eventId: seat.eventId,
+    section: seat.section,
+    rowName: seat.rowName,
+    seatNumber: seat.seatNumber,
+    displayLabel: seat.displayLabel,
+    category: seat.category as Seat['category'],
+    priceMultiplier: seat.priceMultiplier.toNumber(),
+    status: seat.status as SeatStatus,
+    heldBy: seat.heldById,
+    holdExpiresAt: seat.holdExpiresAt,
+    version: seat.version,
+    createdAt: seat.createdAt,
+    updatedAt: seat.updatedAt,
   };
 }
 
@@ -211,26 +187,13 @@ export async function bookSeat(
   expectedVersion: number
 ): Promise<BookSeatResult> {
   try {
-    return await withTransaction(async (tx) => {
+    return await prisma.$transaction(async (tx: any) => {
       // ========================================================================
       // STEP 1: Acquire exclusive row lock on the seat
       // ========================================================================
-      // This is CRITICAL - it serializes concurrent access to this seat
-      // Any other transaction trying to book this seat will WAIT here
-      const seat = await selectForUpdate<{
-        id: string;
-        event_id: string;
-        section: string;
-        row_name: string;
-        seat_number: string;
-        display_label: string;
-        category: string;
-        price_multiplier: number;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-      }>(tx, 'seats', seatId);
+      // Using tagged template for FOR UPDATE lock
+      const seats = await tx.$queryRaw<any[]>`SELECT * FROM seats WHERE id = ${seatId}::uuid FOR UPDATE`;
+      const seat = seats[0];
 
       if (!seat) {
         return {
@@ -252,13 +215,12 @@ export async function bookSeat(
       // ========================================================================
       // STEP 2: Check optimistic lock version
       // ========================================================================
-      // This prevents lost updates when clients have stale data
       if (seat.version !== expectedVersion) {
         return {
           success: false,
           code: 'VERSION_CONFLICT' as BookingErrorCode,
           message: `Version conflict: expected ${expectedVersion}, got ${seat.version}`,
-          currentStatus: seat.status,
+          currentStatus: seat.status as SeatStatus,
           currentVersion: seat.version,
         };
       }
@@ -273,7 +235,7 @@ export async function bookSeat(
           success: false,
           code: 'SEAT_ALREADY_BOOKED' as BookingErrorCode,
           message: `Seat ${seat.display_label} is already booked`,
-          currentStatus: seat.status,
+          currentStatus: seat.status as SeatStatus,
           currentVersion: seat.version,
         };
       }
@@ -283,30 +245,28 @@ export async function bookSeat(
           success: false,
           code: 'SEAT_NOT_AVAILABLE' as BookingErrorCode,
           message: `Seat ${seat.display_label} is not available`,
-          currentStatus: seat.status,
+          currentStatus: seat.status as SeatStatus,
           currentVersion: seat.version,
         };
       }
 
-      // If held, must be held by this user and not expired
       if (seat.status === 'held') {
         if (seat.held_by !== userId) {
           return {
             success: false,
             code: 'SEAT_ALREADY_HELD' as BookingErrorCode,
             message: `Seat ${seat.display_label} is held by another user`,
-            currentStatus: seat.status,
+            currentStatus: seat.status as SeatStatus,
             currentVersion: seat.version,
           };
         }
 
-        // Check if hold has expired
         if (seat.hold_expires_at && seat.hold_expires_at < now) {
           return {
             success: false,
             code: 'HOLD_EXPIRED' as BookingErrorCode,
             message: 'Your hold on this seat has expired',
-            currentStatus: 'available', // It's effectively available now
+            currentStatus: 'available',
             currentVersion: seat.version,
           };
         }
@@ -315,19 +275,10 @@ export async function bookSeat(
       // ========================================================================
       // STEP 4: Verify event is open for booking
       // ========================================================================
-      const eventResult = await tx.query<{
-        status: string;
-        booking_opens: Date;
-        booking_closes: Date;
-        base_price_cents: number;
-        currency: string;
-      }>(
-        `SELECT status, booking_opens, booking_closes, base_price_cents, currency
-         FROM events WHERE id = $1`,
-        [eventId]
-      );
+      const event = await tx.event.findUnique({
+        where: { id: eventId }
+      });
 
-      const event = eventResult.rows[0];
       if (!event) {
         return {
           success: false,
@@ -344,15 +295,15 @@ export async function bookSeat(
         };
       }
 
-      if (now < event.booking_opens) {
+      if (now < event.bookingOpens) {
         return {
           success: false,
           code: 'BOOKING_NOT_OPEN' as BookingErrorCode,
-          message: `Booking opens at ${event.booking_opens.toISOString()}`,
+          message: `Booking opens at ${event.bookingOpens.toISOString()}`,
         };
       }
 
-      if (now > event.booking_closes) {
+      if (now > event.bookingCloses) {
         return {
           success: false,
           code: 'BOOKING_CLOSED' as BookingErrorCode,
@@ -363,93 +314,50 @@ export async function bookSeat(
       // ========================================================================
       // STEP 5: Update seat status to 'booked'
       // ========================================================================
-      // Increment version for optimistic locking
-      const updateResult = await tx.query<{
-        id: string;
-        event_id: string;
-        section: string;
-        row_name: string;
-        seat_number: string;
-        display_label: string;
-        category: string;
-        price_multiplier: number;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-        created_at: Date;
-        updated_at: Date;
-      }>(
-        `UPDATE seats
-         SET status = 'booked',
-             held_by = $1,
-             hold_expires_at = NULL,
-             version = version + 1,
-             updated_at = NOW()
-         WHERE id = $2 AND version = $3
-         RETURNING *`,
-        [userId, seatId, expectedVersion]
-      );
-
-      // This should never happen due to our FOR UPDATE lock, but just in case
-      if (updateResult.rowCount === 0) {
-        throw new OptimisticLockError('seats', seatId, expectedVersion);
-      }
-
-      const updatedSeat = updateResult.rows[0];
+      const updatedSeat = await tx.seat.update({
+        where: { id: seatId, version: expectedVersion },
+        data: {
+          status: 'booked',
+          heldById: userId,
+          holdExpiresAt: null,
+          version: { increment: 1 }
+        }
+      });
 
       // ========================================================================
       // STEP 6: Create booking record
       // ========================================================================
-      const priceCents = Math.round(event.base_price_cents * seat.price_multiplier);
+      const priceCents = Math.round(event.basePriceCents * updatedSeat.priceMultiplier.toNumber());
 
-      const bookingResult = await tx.query<{
-        id: string;
-        seat_id: string;
-        event_id: string;
-        user_id: string;
-        confirmation_code: string;
-        price_cents: number;
-        currency: string;
-        payment_intent_id: string | null;
-        payment_status: string;
-        status: string;
-        booked_at: Date;
-        cancelled_at: Date | null;
-        checked_in_at: Date | null;
-        created_at: Date;
-        updated_at: Date;
-        version: number;
-      }>(
-        `INSERT INTO bookings (seat_id, event_id, user_id, price_cents, currency, payment_status)
-         VALUES ($1, $2, $3, $4, $5, 'completed')
-         RETURNING *`,
-        [seatId, eventId, userId, priceCents, event.currency]
-      );
-
-      const booking = bookingResult.rows[0];
+      const booking = await tx.booking.create({
+        data: {
+          seatId,
+          eventId,
+          userId,
+          priceCents,
+          currency: event.currency,
+          paymentStatus: 'completed',
+          confirmationCode: generateConfirmationCode()
+        }
+      });
 
       // ========================================================================
       // STEP 7: Insert audit log entry
       // ========================================================================
-      await tx.query(
-        `INSERT INTO booking_audit_log
-           (entity_type, entity_id, action, actor_id, actor_type, old_values, new_values)
-         VALUES
-           ('seat', $1, 'book', $2, 'user',
-            $3::jsonb,
-            $4::jsonb)`,
-        [
-          seatId,
-          userId,
-          JSON.stringify({ status: seat.status, version: seat.version }),
-          JSON.stringify({
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'seat',
+          entityId: seatId,
+          action: 'book',
+          actorId: userId,
+          oldValues: { status: seat.status, version: seat.version },
+          newValues: {
             status: 'booked',
             version: updatedSeat.version,
             bookingId: booking.id,
-          }),
-        ]
-      );
+          }
+        }
+      });
 
       // ========================================================================
       // STEP 8: Return success
@@ -458,48 +366,47 @@ export async function bookSeat(
         success: true as const,
         booking: {
           id: booking.id,
-          seatId: booking.seat_id,
-          eventId: booking.event_id,
-          userId: booking.user_id,
-          confirmationCode: booking.confirmation_code,
-          priceCents: booking.price_cents,
+          seatId: booking.seatId,
+          eventId: booking.eventId,
+          userId: booking.userId,
+          confirmationCode: booking.confirmationCode,
+          priceCents: booking.priceCents,
           currency: booking.currency,
-          paymentIntentId: booking.payment_intent_id,
-          paymentStatus: booking.payment_status as Booking['paymentStatus'],
+          paymentIntentId: booking.paymentIntentId,
+          paymentStatus: booking.paymentStatus as Booking['paymentStatus'],
           status: booking.status as Booking['status'],
-          bookedAt: booking.booked_at,
-          cancelledAt: booking.cancelled_at,
-          checkedInAt: booking.checked_in_at,
-          createdAt: booking.created_at,
-          updatedAt: booking.updated_at,
+          bookedAt: booking.bookedAt,
+          cancelledAt: booking.cancelledAt,
+          checkedInAt: booking.checkedInAt,
+          createdAt: booking.createdAt,
+          updatedAt: booking.updatedAt,
           version: booking.version,
         },
         seat: {
           id: updatedSeat.id,
-          eventId: updatedSeat.event_id,
+          eventId: updatedSeat.eventId,
           section: updatedSeat.section,
-          rowName: updatedSeat.row_name,
-          seatNumber: updatedSeat.seat_number,
-          displayLabel: updatedSeat.display_label,
+          rowName: updatedSeat.rowName,
+          seatNumber: updatedSeat.seatNumber,
+          displayLabel: updatedSeat.displayLabel,
           category: updatedSeat.category as Seat['category'],
-          priceMultiplier: updatedSeat.price_multiplier,
-          status: updatedSeat.status,
-          heldBy: updatedSeat.held_by,
-          holdExpiresAt: updatedSeat.hold_expires_at,
+          priceMultiplier: updatedSeat.priceMultiplier.toNumber(),
+          status: updatedSeat.status as SeatStatus,
+          heldBy: updatedSeat.heldById,
+          holdExpiresAt: updatedSeat.holdExpiresAt,
           version: updatedSeat.version,
-          createdAt: updatedSeat.created_at,
-          updatedAt: updatedSeat.updated_at,
+          createdAt: updatedSeat.createdAt,
+          updatedAt: updatedSeat.updatedAt,
         },
       };
     });
-  } catch (error) {
-    if (error instanceof OptimisticLockError) {
-      return {
-        success: false,
-        code: 'VERSION_CONFLICT' as BookingErrorCode,
-        message: error.message,
-        currentVersion: error.actualVersion,
-      };
+  } catch (error: any) {
+    if (error.code === 'P2025') { // Prisma Record Not Found (Update failed)
+       return {
+         success: false,
+         code: 'VERSION_CONFLICT' as BookingErrorCode,
+         message: 'Version conflict or seat disappeared',
+       };
     }
     console.error('Unexpected error in bookSeat:', error);
     return {
@@ -526,17 +433,10 @@ export async function holdSeat(
   expectedVersion: number
 ): Promise<HoldSeatResult> {
   try {
-    return await withTransaction(async (tx) => {
+    return await prisma.$transaction(async (tx: any) => {
       // Acquire row lock
-      const seat = await selectForUpdate<{
-        id: string;
-        event_id: string;
-        display_label: string;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-      }>(tx, 'seats', seatId);
+      const seats = await tx.$queryRaw<any[]>`SELECT * FROM seats WHERE id = ${seatId}::uuid FOR UPDATE`;
+      const seat = seats[0];
 
       if (!seat) {
         return {
@@ -560,14 +460,14 @@ export async function holdSeat(
           success: false,
           code: 'VERSION_CONFLICT' as BookingErrorCode,
           message: `Version conflict: expected ${expectedVersion}, got ${seat.version}`,
-          currentStatus: seat.status,
+          currentStatus: seat.status as SeatStatus,
           currentVersion: seat.version,
         };
       }
 
       // Can only hold available seats
       if (seat.status !== 'available') {
-        const errorMap: Record<SeatStatus, { code: BookingErrorCode; message: string }> = {
+        const errorMap: Record<string, { code: BookingErrorCode; message: string }> = {
           held: {
             code: 'SEAT_ALREADY_HELD',
             message: `Seat ${seat.display_label} is already held`,
@@ -580,13 +480,15 @@ export async function holdSeat(
             code: 'SEAT_NOT_AVAILABLE',
             message: `Seat ${seat.display_label} is not available`,
           },
-          available: { code: 'INTERNAL_ERROR', message: '' }, // Won't happen
         };
+
+        const error = errorMap[seat.status] || { code: 'INTERNAL_ERROR' as BookingErrorCode, message: 'Unknown status' };
 
         return {
           success: false,
-          ...errorMap[seat.status],
-          currentStatus: seat.status,
+          code: error.code,
+          message: error.message,
+          currentStatus: seat.status as SeatStatus,
           currentVersion: seat.version,
         };
       }
@@ -595,85 +497,60 @@ export async function holdSeat(
       const holdExpiresAt = new Date(Date.now() + HOLD_DURATION_MS);
 
       // Update seat
-      const updateResult = await tx.query<{
-        id: string;
-        event_id: string;
-        section: string;
-        row_name: string;
-        seat_number: string;
-        display_label: string;
-        category: string;
-        price_multiplier: number;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-        created_at: Date;
-        updated_at: Date;
-      }>(
-        `UPDATE seats
-         SET status = 'held',
-             held_by = $1,
-             hold_expires_at = $2,
-             version = version + 1,
-             updated_at = NOW()
-         WHERE id = $3 AND version = $4
-         RETURNING *`,
-        [userId, holdExpiresAt, seatId, expectedVersion]
-      );
-
-      if (updateResult.rowCount === 0) {
-        throw new OptimisticLockError('seats', seatId, expectedVersion);
-      }
-
-      const updatedSeat = updateResult.rows[0];
+      const updatedSeat = await tx.seat.update({
+        where: { id: seatId, version: expectedVersion },
+        data: {
+          status: 'held',
+          heldById: userId,
+          holdExpiresAt: holdExpiresAt,
+          version: { increment: 1 }
+        }
+      });
 
       // Audit log
-      await tx.query(
-        `INSERT INTO booking_audit_log
-           (entity_type, entity_id, action, actor_id, actor_type, old_values, new_values)
-         VALUES ('seat', $1, 'hold', $2, 'user', $3::jsonb, $4::jsonb)`,
-        [
-          seatId,
-          userId,
-          JSON.stringify({ status: seat.status, version: seat.version }),
-          JSON.stringify({
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'seat',
+          entityId: seatId,
+          action: 'hold',
+          actorId: userId,
+          oldValues: { status: seat.status, version: seat.version },
+          newValues: {
             status: 'held',
             version: updatedSeat.version,
             holdExpiresAt: holdExpiresAt.toISOString(),
-          }),
-        ]
-      );
+          }
+        }
+      });
 
       return {
         success: true as const,
         seat: {
           id: updatedSeat.id,
-          eventId: updatedSeat.event_id,
+          eventId: updatedSeat.eventId,
           section: updatedSeat.section,
-          rowName: updatedSeat.row_name,
-          seatNumber: updatedSeat.seat_number,
-          displayLabel: updatedSeat.display_label,
+          rowName: updatedSeat.rowName,
+          seatNumber: updatedSeat.seatNumber,
+          displayLabel: updatedSeat.displayLabel,
           category: updatedSeat.category as Seat['category'],
-          priceMultiplier: updatedSeat.price_multiplier,
-          status: updatedSeat.status,
-          heldBy: updatedSeat.held_by,
-          holdExpiresAt: updatedSeat.hold_expires_at,
+          priceMultiplier: updatedSeat.priceMultiplier.toNumber(),
+          status: updatedSeat.status as SeatStatus,
+          heldBy: updatedSeat.heldById,
+          holdExpiresAt: updatedSeat.holdExpiresAt,
           version: updatedSeat.version,
-          createdAt: updatedSeat.created_at,
-          updatedAt: updatedSeat.updated_at,
+          createdAt: updatedSeat.createdAt,
+          updatedAt: updatedSeat.updatedAt,
         },
         holdExpiresAt,
       };
     });
-  } catch (error) {
-    if (error instanceof OptimisticLockError) {
-      return {
-        success: false,
-        code: 'VERSION_CONFLICT' as BookingErrorCode,
-        message: error.message,
-        currentVersion: error.actualVersion,
-      };
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+       return {
+         success: false,
+         code: 'VERSION_CONFLICT' as BookingErrorCode,
+         message: 'Version conflict or seat disappeared',
+       };
     }
     console.error('Unexpected error in holdSeat:', error);
     return {
@@ -698,23 +575,9 @@ export async function releaseSeat(
   userId: UUID
 ): Promise<{ success: true; seat: Seat } | { success: false; code: BookingErrorCode; message: string }> {
   try {
-    return await withTransaction(async (tx) => {
-      const seat = await selectForUpdate<{
-        id: string;
-        event_id: string;
-        section: string;
-        row_name: string;
-        seat_number: string;
-        display_label: string;
-        category: string;
-        price_multiplier: number;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-        created_at: Date;
-        updated_at: Date;
-      }>(tx, 'seats', seatId);
+    return await prisma.$transaction(async (tx: any) => {
+      const seats = await tx.$queryRaw<any[]>`SELECT * FROM seats WHERE id = ${seatId}::uuid FOR UPDATE`;
+      const seat = seats[0];
 
       if (!seat) {
         return {
@@ -733,75 +596,53 @@ export async function releaseSeat(
         };
       }
 
-      const updateResult = await tx.query<{
-        id: string;
-        event_id: string;
-        section: string;
-        row_name: string;
-        seat_number: string;
-        display_label: string;
-        category: string;
-        price_multiplier: number;
-        status: SeatStatus;
-        held_by: string | null;
-        hold_expires_at: Date | null;
-        version: number;
-        created_at: Date;
-        updated_at: Date;
-      }>(
-        `UPDATE seats
-         SET status = 'available',
-             held_by = NULL,
-             hold_expires_at = NULL,
-             version = version + 1,
-             updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [seatId]
-      );
-
-      const updatedSeat = updateResult.rows[0];
+      const updatedSeat = await tx.seat.update({
+        where: { id: seatId },
+        data: {
+          status: 'available',
+          heldById: null,
+          holdExpiresAt: null,
+          version: { increment: 1 }
+        }
+      });
 
       // If there was a booking, cancel it
       if (seat.status === 'booked') {
-        await tx.query(
-          `UPDATE bookings
-           SET status = 'cancelled', cancelled_at = NOW(), updated_at = NOW()
-           WHERE seat_id = $1 AND status = 'confirmed'`,
-          [seatId]
-        );
+        await tx.booking.updateMany({
+          where: { seatId, status: 'confirmed' },
+          data: { status: 'cancelled', cancelledAt: new Date() }
+        });
       }
 
       // Audit log
-      await tx.query(
-        `INSERT INTO booking_audit_log
-           (entity_type, entity_id, action, actor_id, actor_type, old_values, new_values)
-         VALUES ('seat', $1, 'release', $2, 'user', $3::jsonb, $4::jsonb)`,
-        [
-          seatId,
-          userId,
-          JSON.stringify({ status: seat.status, version: seat.version }),
-          JSON.stringify({ status: 'available', version: updatedSeat.version }),
-        ]
-      );
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'seat',
+          entityId: seatId,
+          action: 'release',
+          actorId: userId,
+          oldValues: { status: seat.status, version: seat.version },
+          newValues: { status: 'available', version: updatedSeat.version }
+        }
+      });
 
       return {
         success: true as const,
         seat: {
           id: updatedSeat.id,
-          eventId: updatedSeat.event_id,
+          eventId: updatedSeat.eventId,
           section: updatedSeat.section,
-          rowName: updatedSeat.row_name,
-          seatNumber: updatedSeat.seat_number,
-          displayLabel: updatedSeat.display_label,
+          rowName: updatedSeat.rowName,
+          seatNumber: updatedSeat.seatNumber,
+          displayLabel: updatedSeat.displayLabel,
           category: updatedSeat.category as Seat['category'],
-          priceMultiplier: updatedSeat.price_multiplier,
-          status: updatedSeat.status,
-          heldBy: updatedSeat.held_by,
-          holdExpiresAt: updatedSeat.hold_expires_at,
+          priceMultiplier: updatedSeat.priceMultiplier.toNumber(),
+          status: updatedSeat.status as SeatStatus,
+          heldBy: updatedSeat.heldById,
+          holdExpiresAt: updatedSeat.holdExpiresAt,
           version: updatedSeat.version,
-          createdAt: updatedSeat.created_at,
-          updatedAt: updatedSeat.updated_at,
+          createdAt: updatedSeat.createdAt,
+          updatedAt: updatedSeat.updatedAt,
         },
       };
     });
@@ -828,34 +669,265 @@ export async function expireStaleHolds(): Promise<{
   expiredCount: number;
   expiredSeatIds: UUID[];
 }> {
-  const result = await withTransaction(async (tx) => {
-    const expiredResult = await tx.query<{ id: string; display_label: string }>(
-      `UPDATE seats
-       SET status = 'available',
-           held_by = NULL,
-           hold_expires_at = NULL,
-           version = version + 1,
-           updated_at = NOW()
-       WHERE status = 'held'
-         AND hold_expires_at < NOW()
-       RETURNING id, display_label`
-    );
+  return await prisma.$transaction(async (tx: any) => {
+    // Acquire handles for seats that need expiration
+    // We update them directly
+    const now = new Date();
+    
+    // Find seats to expire
+    const seatsToExpire = await tx.seat.findMany({
+      where: {
+        status: 'held',
+        holdExpiresAt: { lt: now }
+      },
+      select: { id: true, displayLabel: true }
+    });
 
-    // Log all expirations
-    for (const row of expiredResult.rows) {
-      await tx.query(
-        `INSERT INTO booking_audit_log
-           (entity_type, entity_id, action, actor_type, new_values)
-         VALUES ('seat', $1, 'expire_hold', 'system', $2::jsonb)`,
-        [row.id, JSON.stringify({ status: 'available', reason: 'hold_expired' })]
-      );
+    if (seatsToExpire.length === 0) {
+      return { expiredCount: 0, expiredSeatIds: [] };
+    }
+
+    const ids = seatsToExpire.map((s: { id: string }) => s.id);
+
+    // Perform bulk update
+    await tx.seat.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: 'available',
+        heldById: null,
+        holdExpiresAt: null,
+        version: { increment: 1 }
+      }
+    });
+
+    // Log all expirations in audit log
+    for (const seat of seatsToExpire) {
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'seat',
+          entityId: seat.id,
+          action: 'expire_hold',
+          actorType: 'system',
+          newValues: { status: 'available', reason: 'hold_expired' }
+        }
+      });
     }
 
     return {
-      expiredCount: expiredResult.rowCount ?? 0,
-      expiredSeatIds: expiredResult.rows.map((r) => r.id),
+      expiredCount: seatsToExpire.length,
+      expiredSeatIds: ids,
     };
   });
-
-  return result;
 }
+
+/**
+ * Refund a booking - THE REVERSE WRITE PATH
+ * 
+ * Atomically marks a booking as refunded and releases the seat.
+ * Admin only (authorization checked in server action).
+ */
+export async function refundBooking(
+  bookingId: UUID,
+  adminId: UUID
+): Promise<{ 
+  success: true; 
+  seatId: UUID; 
+  eventId: UUID; 
+  seat: { 
+    section: string; 
+    rowName: string; 
+    seatNumber: string; 
+    displayLabel: string; 
+  } 
+} | { success: false; message: string }> {
+  try {
+    return await prisma.$transaction(async (tx: any) => {
+      // 1. Find the booking
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: { seat: true }
+      })
+
+      if (!booking) {
+        return { success: false, message: 'Booking not found' }
+      }
+
+      if (booking.status === 'cancelled' || booking.paymentStatus === 'refunded') {
+        return { success: false, message: 'Booking has already been refunded or cancelled' }
+      }
+
+      // 2. Lock the seat
+      await tx.$queryRaw`SELECT * FROM seats WHERE id = ${booking.seatId}::uuid FOR UPDATE`
+
+      // 3. Update booking
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: 'cancelled',
+          paymentStatus: 'refunded',
+          cancelledAt: new Date()
+        }
+      })
+
+      // 4. Update seat
+      const updatedSeat = await tx.seat.update({
+        where: { id: booking.seatId },
+        data: {
+          status: 'available',
+          heldById: null,
+          holdExpiresAt: null,
+          version: { increment: 1 }
+        }
+      })
+
+      // 5. Audit log
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'booking',
+          entityId: bookingId,
+          action: 'refund',
+          actorId: adminId,
+          oldValues: { status: booking.status, paymentStatus: booking.paymentStatus },
+          newValues: { status: 'cancelled', paymentStatus: 'refunded', seatStatus: 'available' }
+        }
+      })
+
+      return { 
+        success: true, 
+        seatId: booking.seatId,
+        eventId: booking.eventId,
+        seat: {
+          section: updatedSeat.section,
+          rowName: updatedSeat.rowName,
+          seatNumber: updatedSeat.seatNumber,
+          displayLabel: updatedSeat.displayLabel
+        }
+      }
+    })
+  } catch (error: any) {
+    console.error('Error in refundBooking:', error)
+    return { success: false, message: error.message || 'Failed to refund booking' }
+  }
+}
+
+/**
+ * Atomically cancels an event, refunds all its bookings, and releases all seats.
+ */
+export async function bulkRefundEventBookings(
+  eventId: UUID,
+  adminId: UUID
+): Promise<{ 
+  success: true; 
+  releasedSeats: Array<{
+    id: UUID;
+    section: string;
+    rowName: string;
+    seatNumber: string;
+    displayLabel: string;
+  }>
+} | { success: false; message: string }> {
+  try {
+    return await prisma.$transaction(async (tx: any) => {
+      // 1. Verify event exists and is not already cancelled
+      const event = await tx.event.findUnique({
+        where: { id: eventId }
+      })
+
+      if (!event) {
+        return { success: false, message: 'Event not found' }
+      }
+
+      if (event.status === 'cancelled') {
+        return { success: false, message: 'Event is already cancelled' }
+      }
+
+      // 2. Load all confirmed bookings for this event
+      const bookings = await tx.booking.findMany({
+        where: { 
+          eventId,
+          status: 'confirmed'
+        },
+        include: { seat: true }
+      })
+
+      // 3. Mark event as cancelled
+      await tx.event.update({
+        where: { id: eventId },
+        data: { 
+          status: 'cancelled',
+          version: { increment: 1 }
+        }
+      })
+
+      // 4. Update all active bookings to cancelled/refunded
+      if (bookings.length > 0) {
+        await tx.booking.updateMany({
+          where: { 
+            eventId,
+            status: 'confirmed'
+          },
+          data: {
+            status: 'cancelled',
+            paymentStatus: 'refunded',
+            cancelledAt: new Date(),
+            version: { increment: 1 }
+          }
+        })
+      }
+
+      // 5. Identify seats that need to be released
+      const changedSeats = await tx.seat.findMany({
+        where: {
+          eventId,
+          status: { in: ['booked', 'held'] }
+        },
+        select: {
+          id: true,
+          section: true,
+          rowName: true,
+          seatNumber: true,
+          displayLabel: true
+        }
+      })
+
+      // 6. Release those seats
+      if (changedSeats.length > 0) {
+        await tx.seat.updateMany({
+          where: { 
+            id: { in: changedSeats.map((s: any) => s.id) }
+          },
+          data: {
+            status: 'available',
+            heldById: null,
+            holdExpiresAt: null,
+            version: { increment: 1 }
+          }
+        })
+      }
+
+      // 7. Audit logs
+      // Event cancellation log
+      await tx.bookingAuditLog.create({
+        data: {
+          entityType: 'event',
+          entityId: eventId,
+          action: 'cancel_event',
+          actorId: adminId,
+          newValues: { status: 'cancelled', bookingsRefunded: bookings.length, seatsReleased: changedSeats.length }
+        }
+      })
+
+      return { 
+        success: true, 
+        releasedSeats: changedSeats
+      }
+    }, {
+      // Give the transaction more time for large events
+      timeout: 30000 
+    })
+  } catch (error: any) {
+    console.error('Error in bulkRefundEventBookings:', error)
+    return { success: false, message: error.message || 'Failed to bulk refund bookings' }
+  }
+}
+

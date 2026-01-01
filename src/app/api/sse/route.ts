@@ -38,10 +38,12 @@ export async function GET(request: NextRequest): Promise<Response> {
     return new Response('Missing eventId parameter', { status: 400 });
   }
 
-  // Validate UUID format
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(eventId)) {
-    return new Response('Invalid eventId format', { status: 400 });
+  // Validate UUID format, unless it's the special 'admin' channel
+  if (eventId !== 'admin') {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(eventId)) {
+      return new Response('Invalid eventId format', { status: 400 });
+    }
   }
 
   // ========================================================================

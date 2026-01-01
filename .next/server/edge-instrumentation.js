@@ -1,0 +1,29 @@
+// runtime can't be in strict mode because a global variable is assign and maybe created.
+/*
+ * ATTENTION: An "eval-source-map" devtool has been used.
+ * This devtool is neither made for production nor for readable output files.
+ * It uses "eval()" calls to create a separate source file with attached SourceMaps in the browser devtools.
+ * If you are trying to read the output file, select a different devtool (https://webpack.js.org/configuration/devtool/)
+ * or disable the default devtool with "devtool: false".
+ * If you are looking for production-ready output files, see mode: "production" (https://webpack.js.org/configuration/mode/).
+ */
+(self["webpackChunk_N_E"] = self["webpackChunk_N_E"] || []).push([["instrumentation"],{
+
+/***/ "(instrument)/./src/instrumentation.ts":
+/*!********************************!*\
+  !*** ./src/instrumentation.ts ***!
+  \********************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   register: () => (/* binding */ register)\n/* harmony export */ });\n// ============================================================================\n// NEXT.JS INSTRUMENTATION\n// ============================================================================\n//\n// This file runs once when the Next.js server starts.\n// We use it to initialize the Kafka consumer so it runs in the same\n// process as the Next.js server, sharing memory with SSE connections.\n//\n// Documentation: https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation\n//\n// ============================================================================\nasync function register() {\n    console.log(\"[Instrumentation] Register called, runtime:\", \"edge\", \"PID:\", process.pid);\n    // Only run on the server (not in edge runtime or client)\n    // In development, this runs in the Node.js runtime\n    if (false) {} else {\n        console.log(\"[Instrumentation] Skipping Kafka consumer (not in nodejs runtime), PID:\", process.pid);\n    }\n}\n//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKGluc3RydW1lbnQpLy4vc3JjL2luc3RydW1lbnRhdGlvbi50cyIsIm1hcHBpbmdzIjoiOzs7O0FBQUEsK0VBQStFO0FBQy9FLDBCQUEwQjtBQUMxQiwrRUFBK0U7QUFDL0UsRUFBRTtBQUNGLHNEQUFzRDtBQUN0RCxvRUFBb0U7QUFDcEUsc0VBQXNFO0FBQ3RFLEVBQUU7QUFDRixrR0FBa0c7QUFDbEcsRUFBRTtBQUNGLCtFQUErRTtBQUV4RSxlQUFlQTtJQUNwQkMsUUFBUUMsR0FBRyxDQUFDLCtDQUErQ0MsTUFBd0IsRUFBRSxRQUFRQSxRQUFRRyxHQUFHO0lBRXhHLHlEQUF5RDtJQUN6RCxtREFBbUQ7SUFDbkQsSUFBSUgsS0FBa0UsRUFBRSxFQWlCdkUsTUFBTTtRQUNMRixRQUFRQyxHQUFHLENBQUMsMkVBQTJFQyxRQUFRRyxHQUFHO0lBQ3BHO0FBQ0YiLCJzb3VyY2VzIjpbIndlYnBhY2s6Ly9fTl9FLy4vc3JjL2luc3RydW1lbnRhdGlvbi50cz80ZmFiIl0sInNvdXJjZXNDb250ZW50IjpbIi8vID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT1cbi8vIE5FWFQuSlMgSU5TVFJVTUVOVEFUSU9OXG4vLyA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09XG4vL1xuLy8gVGhpcyBmaWxlIHJ1bnMgb25jZSB3aGVuIHRoZSBOZXh0LmpzIHNlcnZlciBzdGFydHMuXG4vLyBXZSB1c2UgaXQgdG8gaW5pdGlhbGl6ZSB0aGUgS2Fma2EgY29uc3VtZXIgc28gaXQgcnVucyBpbiB0aGUgc2FtZVxuLy8gcHJvY2VzcyBhcyB0aGUgTmV4dC5qcyBzZXJ2ZXIsIHNoYXJpbmcgbWVtb3J5IHdpdGggU1NFIGNvbm5lY3Rpb25zLlxuLy9cbi8vIERvY3VtZW50YXRpb246IGh0dHBzOi8vbmV4dGpzLm9yZy9kb2NzL2FwcC9idWlsZGluZy15b3VyLWFwcGxpY2F0aW9uL29wdGltaXppbmcvaW5zdHJ1bWVudGF0aW9uXG4vL1xuLy8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PVxuXG5leHBvcnQgYXN5bmMgZnVuY3Rpb24gcmVnaXN0ZXIoKSB7XG4gIGNvbnNvbGUubG9nKCdbSW5zdHJ1bWVudGF0aW9uXSBSZWdpc3RlciBjYWxsZWQsIHJ1bnRpbWU6JywgcHJvY2Vzcy5lbnYuTkVYVF9SVU5USU1FLCAnUElEOicsIHByb2Nlc3MucGlkKTtcbiAgXG4gIC8vIE9ubHkgcnVuIG9uIHRoZSBzZXJ2ZXIgKG5vdCBpbiBlZGdlIHJ1bnRpbWUgb3IgY2xpZW50KVxuICAvLyBJbiBkZXZlbG9wbWVudCwgdGhpcyBydW5zIGluIHRoZSBOb2RlLmpzIHJ1bnRpbWVcbiAgaWYgKHByb2Nlc3MuZW52Lk5FWFRfUlVOVElNRSA9PT0gJ25vZGVqcycgfHwgIXByb2Nlc3MuZW52Lk5FWFRfUlVOVElNRSkge1xuICAgIGNvbnNvbGUubG9nKCdbSW5zdHJ1bWVudGF0aW9uXSBJbml0aWFsaXppbmcgS2Fma2EgY29uc3VtZXIuLi4nKTtcbiAgICBcbiAgICB0cnkge1xuICAgICAgLy8gRHluYW1pY2FsbHkgaW1wb3J0IHRvIGF2b2lkIGJ1bmRsaW5nIGlzc3Vlc1xuICAgICAgY29uc3QgeyBzdGFydENvbnN1bWVyIH0gPSBhd2FpdCBpbXBvcnQoJ0AvbGliL2thZmthL2NvbnN1bWVyJyk7XG4gICAgICBcbiAgICAgIC8vIFN0YXJ0IHRoZSBjb25zdW1lclxuICAgICAgYXdhaXQgc3RhcnRDb25zdW1lcigpO1xuICAgICAgXG4gICAgICBjb25zb2xlLmxvZygnW0luc3RydW1lbnRhdGlvbl0g4pyTIEthZmthIGNvbnN1bWVyIHN0YXJ0ZWQgc3VjY2Vzc2Z1bGx5Jyk7XG4gICAgfSBjYXRjaCAoZXJyb3IpIHtcbiAgICAgIGNvbnNvbGUuZXJyb3IoJ1tJbnN0cnVtZW50YXRpb25dIOKclyBGYWlsZWQgdG8gc3RhcnQgS2Fma2EgY29uc3VtZXI6JywgZXJyb3IpO1xuICAgICAgLy8gRG9uJ3QgY3Jhc2ggdGhlIHNlcnZlciBpZiBLYWZrYSBpcyB1bmF2YWlsYWJsZVxuICAgICAgLy8gVGhlIGFwcCBjYW4gc3RpbGwgZnVuY3Rpb24gd2l0aG91dCByZWFsLXRpbWUgdXBkYXRlc1xuICAgICAgY29uc29sZS53YXJuKCdbSW5zdHJ1bWVudGF0aW9uXSBTZXJ2ZXIgd2lsbCBjb250aW51ZSB3aXRob3V0IHJlYWwtdGltZSBLYWZrYSB1cGRhdGVzJyk7XG4gICAgfVxuICB9IGVsc2Uge1xuICAgIGNvbnNvbGUubG9nKCdbSW5zdHJ1bWVudGF0aW9uXSBTa2lwcGluZyBLYWZrYSBjb25zdW1lciAobm90IGluIG5vZGVqcyBydW50aW1lKSwgUElEOicsIHByb2Nlc3MucGlkKTtcbiAgfVxufVxuXG4iXSwibmFtZXMiOlsicmVnaXN0ZXIiLCJjb25zb2xlIiwibG9nIiwicHJvY2VzcyIsImVudiIsIk5FWFRfUlVOVElNRSIsInBpZCIsInN0YXJ0Q29uc3VtZXIiLCJlcnJvciIsIndhcm4iXSwic291cmNlUm9vdCI6IiJ9\n//# sourceURL=webpack-internal:///(instrument)/./src/instrumentation.ts\n");
+
+/***/ })
+
+},
+/******/ __webpack_require__ => { // webpackRuntimeModules
+/******/ var __webpack_exec__ = (moduleId) => (__webpack_require__(__webpack_require__.s = moduleId))
+/******/ var __webpack_exports__ = (__webpack_exec__("(instrument)/./src/instrumentation.ts"));
+/******/ (_ENTRIES = typeof _ENTRIES === "undefined" ? {} : _ENTRIES).middleware_instrumentation = __webpack_exports__;
+/******/ }
+]);

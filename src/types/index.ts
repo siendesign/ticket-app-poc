@@ -184,6 +184,29 @@ export interface ReleaseSeatResponse {
   };
 }
 
+export interface CreateEventRequest {
+  name: string;
+  description?: string;
+  venueName: string;
+  venueAddress?: string;
+  eventDate: string; // ISO string from form
+  doorsOpen?: string; // ISO string from form
+  bookingOpens: string; // ISO string from form
+  bookingCloses: string; // ISO string from form
+  totalSeats: number;
+  basePriceCents: number;
+  currency?: string;
+}
+
+export interface CreateEventResponse {
+  success: boolean;
+  event?: Event;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
 // ----------------------------------------------------------------------------
 // Real-time Event Types (SSE/WebSocket)
 // ----------------------------------------------------------------------------

@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name")
+  phone        String?
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  version      Int      @default(1)
+
+  events         Event[]
+  seatsHeld      Seat[]             @relation("UserSeatsHeld")
+  bookings       Booking[]
+  auditLogs      BookingAuditLog[]
+
+  @@map("users")
+}
+
+model Event {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name           String
+  description    String?
+  venueName      String   @map("venue_name")
+  venueAddress   String?  @map("venue_address")
+  eventDate      DateTime @map("event_date")
+  doorsOpen      DateTime? @map("doors_open")
+  bookingOpens   DateTime @map("booking_opens")
+  bookingCloses  DateTime @map("booking_closes")
+  totalSeats     Int      @map("total_seats")
+  basePriceCents Int      @map("base_price_cents")
+  currency       String   @default("USD") @db.Char(3)
+  status         String   @default("draft")
+  createdById    String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+  version        Int      @default(1)
+
+  createdBy      User      @relation(fields: [createdById], references: [id])
+  seats          Seat[]
+  bookings       Booking[]
+
+  @@map("events")
+}
+
+model Seat {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId         String   @map("event_id") @db.Uuid
+  section         String
+  rowName         String   @map("row_name")
+  seatNumber      String   @map("seat_number")
+  displayLabel    String   @map("display_label")
+  category        String   @default("standard")
+  priceMultiplier Decimal  @default(1.00) @db.Decimal(4, 2) @map("price_multiplier")
+  status          String   @default("available")
+  heldById        String?  @map("held_by") @db.Uuid
+  holdExpiresAt   DateTime? @map("hold_expires_at")
+  version         Int      @default(1)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  heldBy          User?     @relation("UserSeatsHeld", fields: [heldById], references: [id])
+  booking         Booking?
+
+  @@unique([eventId, section, rowName, seatNumber], name: "seats_unique_position")
+  @@map("seats")
+}
+
+model Booking {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  seatId           String   @unique @map("seat_id") @db.Uuid
+  eventId          String   @map("event_id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  confirmationCode String   @unique @map("confirmation_code")
+  priceCents       Int      @map("price_cents")
+  currency         String   @default("USD") @db.Char(3)
+  paymentIntentId  String?  @map("payment_intent_id")
+  paymentStatus    String   @default("pending") @map("payment_status")
+  status           String   @default("confirmed")
+  bookedAt         DateTime @default(now()) @map("booked_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+  checkedInAt      DateTime? @map("checked_in_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+  version          Int      @default(1)
+
+  seat             Seat      @relation(fields: [seatId], references: [id])
+  event            Event     @relation(fields: [eventId], references: [id])
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@map("bookings")
+}
+
+model BookingAuditLog {
+  id         BigInt   @id @default(autoincrement())
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  action     String
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorType  String   @default("user") @map("actor_type")
+  oldValues  Json?    @map("old_values")
+  newValues  Json?    @map("new_values")
+  requestId  String?  @map("request_id") @db.Uuid
+  ipAddress  String?  @map("ip_address") // Prisma doesn't have an INET type, use String
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor      User?    @relation(fields: [actorId], references: [id])
+
+  @@map("booking_audit_log")
+}

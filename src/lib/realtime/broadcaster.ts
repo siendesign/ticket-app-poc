@@ -33,11 +33,22 @@ interface ClientConnection {
 }
 
 // In-memory connection store
-// For production multi-instance: use Redis to coordinate
-const connections = new Map<string, ClientConnection>();
+// Singleton pattern to handle Next.js module duplication
+const globalForBroadcaster = globalThis as unknown as {
+  connections: Map<string, ClientConnection>;
+  connectionsByEvent: Map<UUID, Set<string>>;
+  globalConnections: Set<string>;
+};
 
-// Index by eventId for efficient broadcast
-const connectionsByEvent = new Map<UUID, Set<string>>();
+const connections = globalForBroadcaster.connections || new Map<string, ClientConnection>();
+const connectionsByEvent = globalForBroadcaster.connectionsByEvent || new Map<UUID, Set<string>>();
+const globalConnections = globalForBroadcaster.globalConnections || new Set<string>();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForBroadcaster.connections = connections;
+  globalForBroadcaster.connectionsByEvent = connectionsByEvent;
+  globalForBroadcaster.globalConnections = globalConnections;
+}
 
 // ----------------------------------------------------------------------------
 // Connection Management
@@ -68,16 +79,19 @@ export function registerConnection(
 
   connections.set(connectionId, connection);
 
-  // Add to event index
-  if (!connectionsByEvent.has(eventId)) {
-    connectionsByEvent.set(eventId, new Set());
+  // Add to indices
+  if (eventId === 'admin' as UUID) {
+    globalConnections.add(connectionId);
+    console.log(`SSE connection registered as GLOBAL/ADMIN: ${connectionId}`);
+  } else {
+    if (!connectionsByEvent.has(eventId)) {
+      connectionsByEvent.set(eventId, new Set());
+    }
+    connectionsByEvent.get(eventId)!.add(connectionId);
+    console.log(`SSE connection registered: ${connectionId} for event ${eventId}`);
   }
-  connectionsByEvent.get(eventId)!.add(connectionId);
 
-  console.log(
-    `SSE connection registered: ${connectionId} for event ${eventId}`,
-    `(total: ${connections.size})`
-  );
+  console.log(`Total active connections: ${connections.size}`);
 }
 
 /**
@@ -87,12 +101,16 @@ export function unregisterConnection(connectionId: string): void {
   const connection = connections.get(connectionId);
   if (!connection) return;
 
-  // Remove from event index
-  const eventConnections = connectionsByEvent.get(connection.eventId);
-  if (eventConnections) {
-    eventConnections.delete(connectionId);
-    if (eventConnections.size === 0) {
-      connectionsByEvent.delete(connection.eventId);
+  // Remove from index
+  if (connection.eventId === 'admin' as UUID) {
+    globalConnections.delete(connectionId);
+  } else {
+    const eventConnections = connectionsByEvent.get(connection.eventId);
+    if (eventConnections) {
+      eventConnections.delete(connectionId);
+      if (eventConnections.size === 0) {
+        connectionsByEvent.delete(connection.eventId);
+      }
     }
   }
 
@@ -130,18 +148,19 @@ export async function broadcastToEvent(
   event: RealtimeEvent<SeatStatusChangePayload>,
   actorUserId?: UUID
 ): Promise<void> {
-  const eventConnections = connectionsByEvent.get(eventId);
+  const eventConnections = connectionsByEvent.get(eventId) || new Set<string>();
+  const allTargetConnections = new Set([...eventConnections, ...globalConnections]);
 
-  if (!eventConnections || eventConnections.size === 0) {
-    console.log(`No connections for event ${eventId}, skipping broadcast`);
+  if (allTargetConnections.size === 0) {
+    console.log(`No connections for event ${eventId} (including globals), skipping broadcast`);
     return;
   }
 
-  console.log(`Broadcasting ${event.type} to ${eventConnections.size} connections`);
+  console.log(`Broadcasting ${event.type} to ${allTargetConnections.size} connections (Event: ${eventConnections.size}, Global: ${globalConnections.size})`);
 
   const failedConnections: string[] = [];
 
-  for (const connectionId of eventConnections) {
+  for (const connectionId of allTargetConnections) {
     const connection = connections.get(connectionId);
     if (!connection) continue;
 
