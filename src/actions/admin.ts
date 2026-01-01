@@ -100,7 +100,7 @@ export async function createEventAction(request: CreateEventRequest): Promise<Cr
   try {
     const event = await createEvent({
       ...request,
-      createdById: user.userId,
+      createdById: user.id,
     })
 
     revalidatePath('/admin')
@@ -187,7 +187,7 @@ export async function refundBookingAction(bookingId: string) {
   }
 
   try {
-    const result = await refundBooking(bookingId, user.userId)
+    const result = await refundBooking(bookingId, user.id)
 
     if (!result.success) {
       return { success: false, error: result.message }
@@ -203,7 +203,7 @@ export async function refundBookingAction(bookingId: string) {
         payload: {
           eventId: result.eventId,
           seatId: result.seatId,
-          userId: user.userId,
+          userId: user.id,
           previousStatus: 'booked',
           newStatus: 'available',
           metadata: {
@@ -236,7 +236,7 @@ export async function cancelEventAction(eventId: string) {
   }
 
   try {
-    const result = await bulkRefundEventBookings(eventId, user.userId)
+    const result = await bulkRefundEventBookings(eventId, user.id)
 
     if (!result.success) {
       return { success: false, error: result.message }
@@ -253,7 +253,7 @@ export async function cancelEventAction(eventId: string) {
           payload: {
             eventId: eventId,
             seatId: seat.id,
-            userId: user.userId,
+            userId: user.id,
             previousStatus: 'booked' as const, // For bulk, we simplify to available
             newStatus: 'available' as const,
             metadata: {

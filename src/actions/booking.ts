@@ -32,35 +32,7 @@ import type {
   SeatMapItem,
 } from '@/types';
 
-// ----------------------------------------------------------------------------
-// Authentication Helper
-// ----------------------------------------------------------------------------
-
-/**
- * Get current user from session
- *
- * In production, this would validate a JWT or session cookie.
- * For this example, we use a simple cookie-based approach.
- */
-async function getCurrentUser(): Promise<{ id: UUID; email: string } | null> {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get('session');
-
-  if (!sessionCookie) {
-    return null;
-  }
-
-  try {
-    // In production: verify JWT signature, check expiration, etc.
-    const session = JSON.parse(sessionCookie.value);
-    return {
-      id: session.userId,
-      email: session.email,
-    };
-  } catch {
-    return null;
-  }
-}
+import { getCurrentUser } from '@/actions/auth';
 
 // ----------------------------------------------------------------------------
 // BOOK SEAT ACTION
