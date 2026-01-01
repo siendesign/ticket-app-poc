@@ -1,4 +1,5 @@
 // ============================================================================
+// ============================================================================
 // SEAT REPOSITORY
 // ============================================================================
 //
@@ -187,7 +188,7 @@ export async function bookSeat(
   expectedVersion: number
 ): Promise<BookSeatResult> {
   try {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prisma.$transaction<BookSeatResult>(async (tx: any) => {
       // ========================================================================
       // STEP 1: Acquire exclusive row lock on the seat
       // ========================================================================
@@ -433,7 +434,7 @@ export async function holdSeat(
   expectedVersion: number
 ): Promise<HoldSeatResult> {
   try {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prisma.$transaction<HoldSeatResult>(async (tx: any) => {
       // Acquire row lock
       const seats = await tx.$queryRaw<any[]>`SELECT * FROM seats WHERE id = ${seatId}::uuid FOR UPDATE`;
       const seat = seats[0];
@@ -575,7 +576,7 @@ export async function releaseSeat(
   userId: UUID
 ): Promise<{ success: true; seat: Seat } | { success: false; code: BookingErrorCode; message: string }> {
   try {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prisma.$transaction<{ success: true; seat: Seat } | { success: false; code: BookingErrorCode; message: string }>(async (tx: any) => {
       const seats = await tx.$queryRaw<any[]>`SELECT * FROM seats WHERE id = ${seatId}::uuid FOR UPDATE`;
       const seat = seats[0];
 
@@ -741,7 +742,17 @@ export async function refundBooking(
   } 
 } | { success: false; message: string }> {
   try {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prisma.$transaction<{ 
+      success: true; 
+      seatId: UUID; 
+      eventId: UUID; 
+      seat: { 
+        section: string; 
+        rowName: string; 
+        seatNumber: string; 
+        displayLabel: string; 
+      } 
+    } | { success: false; message: string }>(async (tx: any) => {
       // 1. Find the booking
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
@@ -827,7 +838,16 @@ export async function bulkRefundEventBookings(
   }>
 } | { success: false; message: string }> {
   try {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prisma.$transaction<{ 
+      success: true; 
+      releasedSeats: Array<{
+        id: UUID;
+        section: string;
+        rowName: string;
+        seatNumber: string;
+        displayLabel: string;
+      }>
+    } | { success: false; message: string }>(async (tx: any) => {
       // 1. Verify event exists and is not already cancelled
       const event = await tx.event.findUnique({
         where: { id: eventId }
