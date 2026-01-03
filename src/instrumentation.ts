@@ -22,6 +22,10 @@ export async function register() {
       // Dynamically import to avoid bundling issues
       const { startConsumer } = await import('@/lib/kafka/consumer');
       
+      // Initialize Redis Broadcaster (triggers subscription)
+      await import('@/lib/realtime/broadcaster');
+
+      
       // Start the consumer
       await startConsumer();
       

@@ -53,11 +53,10 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   try {
     const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get('session');
+    const sessionCookie = cookieStore.get('session_user_id');
 
     if (sessionCookie) {
-      const session = JSON.parse(sessionCookie.value);
-      userId = session.userId;
+      userId = sessionCookie.value;
     }
   } catch {
     // Anonymous connection - that's fine

@@ -20,6 +20,7 @@
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ioredis": "^5.8.2",
     "kafkajs": "^2.2.4",
     "lucide-react": "^0.561.0",
     "next": "^14.1.0",

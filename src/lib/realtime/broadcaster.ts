@@ -18,6 +18,7 @@
 // ============================================================================
 
 import { UUID, RealtimeEvent, SeatStatusChangePayload } from '@/types';
+import { redisPublisher, redisSubscriber } from '@/lib/redis';
 
 // ----------------------------------------------------------------------------
 // Connection Registry
@@ -137,13 +138,44 @@ export function pingConnection(connectionId: string): void {
 // ----------------------------------------------------------------------------
 
 /**
- * Broadcast an event to all clients viewing a specific event
+ * Broadcast an event to all clients viewing a specific event.
+ * 
+ * If Redis is available, this publishes to the Redis channel to reach all instances.
+ * Otherwise, it falls back to local broadcast only.
  *
  * @param eventId - The event (concert) to broadcast to
  * @param event - The real-time event to send
  * @param actorUserId - The user who performed the action (for isCurrentUser flag)
  */
 export async function broadcastToEvent(
+  eventId: UUID,
+  event: RealtimeEvent<SeatStatusChangePayload>,
+  actorUserId?: UUID
+): Promise<void> {
+  // If Redis is available, publish to it so all instances receive the event
+  if (redisPublisher) {
+    try {
+      const message = JSON.stringify({
+        eventId,
+        event,
+        actorUserId,
+      });
+      await redisPublisher.publish('events:broadcast', message);
+      return; 
+    } catch (error) {
+      console.error('Failed to publish to Redis, falling back to local broadcast:', error);
+      // Fall through to local broadcast on error
+    }
+  }
+
+  // Fallback / Local broadcast
+  await broadcastToLocalConnections(eventId, event, actorUserId);
+}
+
+/**
+ * Internal function to broadcast to locally connected clients
+ */
+export async function broadcastToLocalConnections(
   eventId: UUID,
   event: RealtimeEvent<SeatStatusChangePayload>,
   actorUserId?: UUID
@@ -347,43 +379,26 @@ export function cleanupStaleConnections(maxAgeMs: number = 300000): number {
 }
 
 // ----------------------------------------------------------------------------
-// Multi-Instance Support (Redis Pub/Sub)
+// Redis Subscription Setup
 // ----------------------------------------------------------------------------
 
-/*
-For production deployments with multiple server instances, you need to
-coordinate broadcasts across all instances. Here's how:
+if (redisSubscriber) {
+  redisSubscriber.subscribe('events:broadcast', (err) => {
+    if (err) {
+      console.error('Failed to subscribe to events:broadcast:', err);
+    } else {
+      console.log('Subscribed to Redis channel: events:broadcast');
+    }
+  });
 
-1. When an event occurs, publish to Redis pub/sub channel instead of
-   directly broadcasting
-
-2. Each instance subscribes to the Redis channel and broadcasts to
-   its local connections
-
-Example implementation:
-
-import { createClient } from 'redis';
-
-const redisPublisher = createClient();
-const redisSubscriber = createClient();
-
-// Publish (instead of direct broadcast)
-async function publishToRedis(eventId: UUID, event: RealtimeEvent, actorUserId?: UUID) {
-  await redisPublisher.publish('seat-events', JSON.stringify({
-    eventId,
-    event,
-    actorUserId,
-  }));
-}
-
-// Subscribe (in each instance)
-async function subscribeToRedis() {
-  await redisSubscriber.subscribe('seat-events', (message) => {
-    const { eventId, event, actorUserId } = JSON.parse(message);
-    broadcastToEvent(eventId, event, actorUserId);
+  redisSubscriber.on('message', (channel, message) => {
+    if (channel === 'events:broadcast') {
+      try {
+        const { eventId, event, actorUserId } = JSON.parse(message);
+        broadcastToLocalConnections(eventId, event, actorUserId);
+      } catch (error) {
+        console.error('Failed to process Redis message:', error);
+      }
+    }
   });
 }
-
-This ensures all connected clients receive events regardless of which
-server instance they're connected to.
-*/

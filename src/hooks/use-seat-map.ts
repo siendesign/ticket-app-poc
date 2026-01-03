@@ -42,8 +42,7 @@ export function useSeatMap(eventId: string) {
   // SSE Subscription
   useEffect(() => {
     // console.log(`[Frontend] Connecting to SSE for event ${eventId}...`)
-    // const eventSource = new EventSource(`/api/sse?eventId=${eventId}`)
-    const eventSource = new EventSource(`http://localhost:3001/api/sse?eventId=${eventId}`)
+    const eventSource = new EventSource(`/api/sse?eventId=${eventId}`)
 
 
     eventSource.onopen = () => {
@@ -98,7 +97,11 @@ export function useSeatMap(eventId: string) {
     // 1. Optimistic Update
     setSeats(prev => {
       const next = new Map(prev)
-      next.set(seat.id, { ...seat, status: 'booked' as SeatStatus }) // Show as booked immediately
+      next.set(seat.id, { 
+        ...seat, 
+        status: 'booked' as SeatStatus,
+        isOwnedByCurrentUser: true 
+      }) // Show as booked and owned immediately
       return next
     })
 
